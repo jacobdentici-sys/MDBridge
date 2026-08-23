@@ -1,0 +1,61 @@
+name: Bug report
+description: Report a reproducible MDBridge problem
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Never include API keys, tokens, private manifest URLs, email addresses, public IPs, or `data/config.json`.
+  - type: input
+    id: version
+    attributes:
+      label: MDBridge version
+      placeholder: 0.1.1
+    validations:
+      required: true
+  - type: dropdown
+    id: provider
+    attributes:
+      label: Affected integration
+      options:
+        - MDBList
+        - Stremio
+        - Nuvio
+        - TMDB
+        - Kodi / POV
+        - Docker / setup UI
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Describe the expected and actual behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      placeholder: |
+        1. Configure ...
+        2. Run ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: status
+    attributes:
+      label: Sanitized status or logs
+      description: Remove all credentials and personal identifiers before pasting.
+      render: shell
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety check
+      options:
+        - label: I removed all credentials, tokens, private URLs, email addresses, usernames, and IP addresses.
+          required: true
+

@@ -1,0 +1,23 @@
+services:
+  mdbridge:
+    build: .
+    container_name: mdbridge
+    restart: unless-stopped
+    ports:
+      # The setup UI can change account connections and stores API credentials.
+      # Keep it on this host unless you deliberately add a trusted proxy or VPN.
+      - "127.0.0.1:7335:7335"
+    volumes:
+      - ./data:/data
+    environment:
+      # 15 minutes stays comfortably within MDBList's free daily API allowance.
+      # Supporters can lower this; each sync uses at least two MDBList requests.
+      MDBRIDGE_SYNC_INTERVAL: "900"
+      MDBRIDGE_DATA_DIR: "/data"
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
