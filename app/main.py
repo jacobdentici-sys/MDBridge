@@ -1,25 +1,26 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import asynccontextmanager
+import re
+import secrets
+from contextlib import asynccontextmanager, suppress
 from typing import Any
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from .config import load_settings, save_settings
 from .mdblist import MDBListClient
 from .nuvio import NuvioClient
 from .stremio import StremioClient
 from .sync_engine import SyncEngine
+from .tmdb import TMDBClient
 from .ui import render_home
-
 
 engine = SyncEngine()
 loop_task: asyncio.Task | None = None
-stremio_links: dict[str, dict[str, Any]] = {}
 
 
 @asynccontextmanager
@@ -30,15 +31,17 @@ async def lifespan(app: FastAPI):
     await engine.stop()
     if loop_task:
         loop_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await loop_task
 
 
-app = FastAPI(title="MDBridge", version="0.1.1", lifespan=lifespan)
+app = FastAPI(title="MDBridge", version="0.1.2", lifespan=lifespan)
 
 
 class SettingsBody(BaseModel):
     mdblist_api_key: str | None = None
     tmdb_token: str | None = None
-    sync_interval_seconds: int | None = None
+    sync_interval_seconds: int | None = Field(default=None, ge=30)
     import_nuvio: bool | None = None
     import_stremio: bool | None = None
     push_nuvio: bool | None = None
@@ -46,9 +49,9 @@ class SettingsBody(BaseModel):
 
 
 class NuvioBody(BaseModel):
-    email: str
-    password: str
-    profile_id: int = 1
+    email: str = Field(min_length=3)
+    password: str = Field(min_length=1)
+    profile_id: int = Field(default=1, ge=1)
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -60,6 +63,7 @@ async def home(request: Request) -> str:
         tmdb=bool(s.tmdb_token),
         nuvio=bool(s.nuvio_refresh_token),
         stremio=bool(s.stremio_auth_key),
+        sync_interval_seconds=s.sync_interval_seconds,
         addon_url=f"{base}/{s.addon_token}/manifest.json",
     )
 
@@ -90,23 +94,38 @@ async def status(request: Request) -> dict[str, Any]:
 async def update_settings(body: SettingsBody) -> dict[str, Any]:
     s = load_settings()
     data = body.model_dump(exclude_none=True)
+    mdblist_valid = None
+    tmdb_valid = None
+    if body.mdblist_api_key is not None:
+        mdblist_valid = await MDBListClient(body.mdblist_api_key).validate()
+        if not mdblist_valid:
+            raise HTTPException(400, "MDBList API key validation failed")
+    if body.tmdb_token is not None:
+        tmdb_valid = await TMDBClient(body.tmdb_token).validate()
+        if not tmdb_valid:
+            raise HTTPException(400, "TMDB Read Access Token validation failed")
     for key, value in data.items():
-        if key == "sync_interval_seconds":
-            value = max(30, int(value))
         setattr(s, key, value)
     save_settings(s)
-    valid = None
-    if body.mdblist_api_key is not None:
-        valid = await MDBListClient(s.mdblist_api_key).validate()
-        if not valid:
-            raise HTTPException(400, "MDBList API key validation failed")
-    return {"ok": True, "mdblist_valid": valid}
+    return {
+        "ok": True,
+        "mdblist_valid": mdblist_valid,
+        "tmdb_valid": tmdb_valid,
+    }
 
 
 @app.post("/api/nuvio/connect")
 async def connect_nuvio(body: NuvioBody) -> dict[str, Any]:
-    session = await NuvioClient.sign_in(body.email, body.password)
-    profiles = await NuvioClient.profiles(session.access_token)
+    try:
+        session = await NuvioClient.sign_in(body.email, body.password)
+        profiles = await NuvioClient.profiles(session.access_token)
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(
+            401 if exc.response.status_code in {400, 401} else 502,
+            f"Nuvio sign-in failed with HTTP {exc.response.status_code}",
+        ) from None
+    except httpx.RequestError:
+        raise HTTPException(502, "Nuvio could not be reached") from None
     indexes = {int(x.get("profile_index") or 0) for x in profiles}
     if body.profile_id not in indexes:
         raise HTTPException(400, f"Nuvio profile {body.profile_id} was not found. Available: {sorted(indexes)}")
@@ -128,18 +147,27 @@ async def disconnect_nuvio() -> dict[str, Any]:
 @app.post("/api/stremio/link/start")
 async def stremio_link_start() -> dict[str, Any]:
     client = StremioClient()
-    result = await client.create_link()
+    try:
+        result = await client.create_link()
+    except httpx.HTTPError:
+        raise HTTPException(502, "Stremio could not be reached") from None
     code = str(result.get("code") or "").upper()
-    if not code:
+    link = str(result.get("link") or "")
+    if not code or not link.startswith("https://"):
         raise HTTPException(502, "Stremio did not return a link code")
-    stremio_links[code] = result
-    return {"code": code, "link": result.get("link"), "qrcode": result.get("qrcode")}
+    return {"code": code, "link": link, "qrcode": result.get("qrcode")}
 
 
 @app.get("/api/stremio/link/status/{code}")
 async def stremio_link_status(code: str) -> dict[str, Any]:
+    code = code.strip().upper()
+    if not re.fullmatch(r"[A-Z0-9-]{1,64}", code):
+        raise HTTPException(400, "Invalid Stremio link code")
     client = StremioClient()
-    auth_key = await client.read_link(code)
+    try:
+        auth_key = await client.read_link(code)
+    except httpx.HTTPError:
+        raise HTTPException(502, "Stremio could not be reached") from None
     if not auth_key:
         return {"authorized": False}
     if not await client.validate(auth_key):
@@ -147,7 +175,6 @@ async def stremio_link_status(code: str) -> dict[str, Any]:
     s = load_settings()
     s.stremio_auth_key = auth_key
     save_settings(s)
-    stremio_links.pop(code.upper(), None)
     return {"authorized": True}
 
 
@@ -164,8 +191,9 @@ async def sync_now() -> dict[str, Any]:
     try:
         return await engine.sync_once()
     except Exception as exc:
-        engine.last_error = str(exc)
-        raise HTTPException(502, str(exc)) from exc
+        message = public_error(exc)
+        engine.last_error = message
+        raise HTTPException(502, message) from None
 
 
 @app.get("/{token}/manifest.json")
@@ -173,7 +201,7 @@ async def manifest(token: str) -> dict[str, Any]:
     check_addon_token(token)
     return {
         "id": "community.mdbridge",
-        "version": "0.1.1",
+        "version": "0.1.2",
         "name": "MDBridge",
         "description": "MDBList-backed Continue Watching catalogs. Tracking is performed by the MDBridge companion service.",
         "resources": ["catalog"],
@@ -205,25 +233,32 @@ async def catalog(token: str, media_type: str, catalog_id: str) -> dict[str, Any
             continue
         if item.key.imdb not in ids:
             ids.append(item.key.imdb)
-    metas = []
-    for imdb in ids[:30]:
-        meta = await cinemeta_preview(media_type, imdb)
-        if meta:
-            metas.append(meta)
+    semaphore = asyncio.Semaphore(8)
+    async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+
+        async def preview(imdb: str) -> dict[str, Any] | None:
+            async with semaphore:
+                return await cinemeta_preview(client, media_type, imdb)
+
+        results = await asyncio.gather(*(preview(imdb) for imdb in ids[:30]))
+    metas = [meta for meta in results if meta]
     return {"metas": metas}
 
 
 def check_addon_token(token: str) -> None:
-    if token != load_settings().addon_token:
+    if not secrets.compare_digest(token, load_settings().addon_token):
         raise HTTPException(404, "Not found")
 
 
-async def cinemeta_preview(media_type: str, imdb: str) -> dict[str, Any] | None:
+async def cinemeta_preview(
+    client: httpx.AsyncClient,
+    media_type: str,
+    imdb: str,
+) -> dict[str, Any] | None:
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            response = await client.get(f"https://v3-cinemeta.strem.io/meta/{media_type}/{imdb}.json")
-            response.raise_for_status()
-            meta = response.json().get("meta") or {}
+        response = await client.get(f"https://v3-cinemeta.strem.io/meta/{media_type}/{imdb}.json")
+        response.raise_for_status()
+        meta = response.json().get("meta") or {}
         return {
             "id": imdb,
             "type": media_type,
@@ -235,3 +270,12 @@ async def cinemeta_preview(media_type: str, imdb: str) -> dict[str, Any] | None:
         }
     except Exception:
         return {"id": imdb, "type": media_type, "name": imdb}
+
+
+def public_error(exc: Exception) -> str:
+    """Return a useful provider error without request URLs or credentials."""
+    if isinstance(exc, httpx.HTTPStatusError):
+        return f"Provider request failed with HTTP {exc.response.status_code}"
+    if isinstance(exc, httpx.RequestError):
+        return "A provider could not be reached"
+    return str(exc)

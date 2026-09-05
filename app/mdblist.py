@@ -1,14 +1,20 @@
 from __future__ import annotations
 
-from collections import defaultdict
 from typing import Any
 
 import httpx
 
 from .models import MediaKey, ProgressItem, WatchedItem, parse_time
 
-
 BASE = "https://api.mdblist.com"
+
+
+class MDBListHTTPError(RuntimeError):
+    def __init__(self, method: str, path: str, status_code: int):
+        self.status_code = status_code
+        super().__init__(
+            f"MDBList {method.upper()} {path} failed with HTTP {status_code}"
+        )
 
 
 class MDBListClient:
@@ -155,8 +161,8 @@ class MDBListClient:
         body = _key_body(key)
         try:
             await self._request("POST", "/scrobble/clear", json=body)
-        except httpx.HTTPStatusError as exc:
-            if exc.response.status_code != 404:
+        except MDBListHTTPError as exc:
+            if exc.status_code != 404:
                 raise
 
 
@@ -174,7 +180,7 @@ def _key_body(key: MediaKey) -> dict[str, Any]:
 def _scrobble_body(item: ProgressItem) -> dict[str, Any]:
     body = _key_body(item.key)
     body["progress"] = round(max(0.0, min(100.0, item.percent)), 1)
-    body["app_version"] = "MDBridge/0.1.1"
+    body["app_version"] = "MDBridge/0.1.2"
     return body
 
 
@@ -190,6 +196,4 @@ def _raise_for_status(method: str, path: str, response: httpx.Response) -> None:
     try:
         response.raise_for_status()
     except httpx.HTTPStatusError as exc:
-        raise RuntimeError(
-            f"MDBList {method.upper()} {path} failed with HTTP {exc.response.status_code}"
-        ) from None
+        raise MDBListHTTPError(method, path, exc.response.status_code) from None

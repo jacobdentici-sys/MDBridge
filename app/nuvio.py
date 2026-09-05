@@ -8,7 +8,6 @@ import httpx
 from .models import MediaKey, ProgressItem, WatchedItem, parse_time
 from .tmdb import TMDBClient
 
-
 BASE = "https://api.nuvio.tv"
 PUBLISHABLE_KEY = "sb_publishable_1Clq8rlTVACkdcZuqr6_AD__xUUC_EN"
 

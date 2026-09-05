@@ -1,4 +1,4 @@
-# MDBridge 0.1.1
+# MDBridge 0.1.2
 
 [![Tests](https://github.com/jacobdentici-sys/MDBridge/actions/workflows/tests.yml/badge.svg)](https://github.com/jacobdentici-sys/MDBridge/actions/workflows/tests.yml)
 [![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/)
@@ -45,7 +45,7 @@ The optional `manifest.json` endpoint is only for an extra MDBList Continue Watc
 | MDBList -> Stremio | Yes | Yes |
 | POV/Kodi -> MDBList | Handled directly by POV | Handled directly by POV |
 
-MDBridge polls every 15 minutes by default. The minimum allowed interval is 30 seconds.
+MDBridge polls every 15 minutes by default. The minimum allowed interval is 30 seconds, and the setup page now lets you change it without editing JSON.
 
 Each run currently uses at least two MDBList API requests, and watched-history pagination can use more. MDBList's free plan allows 1,000 requests per day, so the 15-minute default leaves room for Kodi add-ons and other clients. A 60-second interval is intended only for an account with a sufficient API allowance.
 
@@ -164,7 +164,7 @@ If Stremio clients outside your home need this catalog, MDBridge must be reachab
 - When a remotely watched item is imported, any matching MDBList paused session is cleared.
 - Progress below 1 percent is ignored to avoid creating noisy Continue Watching entries from accidental starts.
 
-## Current limitations in 0.1.1
+## Current limitations in 0.1.2
 
 - **Manual unwatch is not yet propagated.** Watched synchronization is additive in this build. Marking something unwatched on one service will not remove it from the others.
 - Stremio stores one current playback position per movie/series library item. MDBridge cannot create more resume slots than Stremio itself stores.
@@ -180,15 +180,18 @@ If Stremio clients outside your home need this catalog, MDBridge must be reachab
 
 The included setup web page does not implement its own login. Docker binds it to `127.0.0.1` by default. Access it through an SSH tunnel or private VPN; if you use a public hostname, add HTTPS and authentication at the reverse proxy. See `SECURITY.md`.
 
-## Tests
+## Tests and release checks
 
 ```bash
+pip install -r requirements.txt -r requirements-dev.txt
+ruff check app tests
+pip-audit -r requirements.txt
 PYTHONPATH=. python -m unittest discover -s tests -v
 ```
 
 ## Project notes and attribution
 
-MDBridge was designed against current public API behavior and current open-source implementations as of August 22, 2026. In particular, the Stremio datastore/bitfield and Nuvio Cloud integration behavior was cross-checked against the GPLv3 project **ellite/scrob**. MDBridge is therefore distributed under GPLv3 as well.
+MDBridge was reviewed against current public API behavior and current open-source implementations on September 5, 2026. In particular, the Stremio datastore/bitfield and Nuvio Cloud integration behavior was cross-checked against the GPLv3 project **ellite/scrob**. MDBridge is therefore distributed under GPLv3 as well.
 
 Relevant upstream projects and API documentation:
 

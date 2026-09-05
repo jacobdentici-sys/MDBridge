@@ -6,7 +6,6 @@ import httpx
 
 from .models import MediaKey
 
-
 BASE = "https://api.themoviedb.org/3"
 
 
@@ -22,6 +21,15 @@ class TMDBClient:
             response = await client.get(f"{BASE}{path}", headers=headers, params=params)
             response.raise_for_status()
             return response.json()
+
+    async def validate(self) -> bool:
+        if not self.token:
+            return False
+        try:
+            await self._get("/configuration")
+            return True
+        except (httpx.HTTPError, ValueError):
+            return False
 
     async def find_imdb(self, imdb: str, kind: str) -> int | None:
         cache_key = (imdb, kind)

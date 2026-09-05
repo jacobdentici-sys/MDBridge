@@ -19,11 +19,12 @@ POV/Kodi ───────────────> MDBList <─────
 
 ## Merge rules
 
-1. Watched state is additive in version 0.1.1.
+1. Watched state is additive in version 0.1.2.
 2. MDBList remains authoritative after remote additions are imported.
 3. Newer resume timestamps win; near-tied timestamps use meaningful forward progress.
 4. Watched items do not retain active resume sessions.
 5. Unknown provider fields are preserved when Stremio library records are merged.
+6. Equivalent resume positions are not rewritten on every polling cycle.
 
 ## Stremio behavior
 
@@ -32,4 +33,3 @@ The optional Stremio manifest exposes Continue Watching catalogs, but synchroniz
 ## Trust boundary
 
 The setup API has no built-in login. Docker therefore binds it to loopback by default. Treat `/data` and the private manifest token as secrets, and use an SSH tunnel, private VPN, or authenticated HTTPS reverse proxy.
-

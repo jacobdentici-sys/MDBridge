@@ -2,16 +2,16 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+from contextlib import suppress
+from datetime import UTC, datetime
 from typing import Any
 
-from .config import Settings, load_settings, save_settings
+from .config import load_settings, save_settings
 from .mdblist import MDBListClient
 from .models import ProgressItem, WatchedItem
 from .nuvio import NuvioClient
 from .stremio import StremioClient
 from .tmdb import TMDBClient
-
 
 log = logging.getLogger("mdbridge.sync")
 
@@ -35,10 +35,8 @@ class SyncEngine:
                 except Exception as exc:
                     self.last_error = str(exc)
                     log.exception("MDBridge background sync failed")
-            try:
+            with suppress(TimeoutError):
                 await asyncio.wait_for(self._stop.wait(), timeout=max(30, settings.sync_interval_seconds))
-            except asyncio.TimeoutError:
-                pass
 
     async def stop(self) -> None:
         self._stop.set()
@@ -137,23 +135,44 @@ class SyncEngine:
                     active_progress.append(item.normalized())
 
             pushed_nuvio_watched = pushed_stremio_watched = 0
+            pushed_nuvio_progress = pushed_stremio_progress = 0
             if settings.push_nuvio and nuvio_session:
                 delta = [x for k, x in mb_watched.items() if k not in nuvio_watched]
+                progress_delta = [
+                    x
+                    for x in active_progress
+                    if progress_needs_push(x, nuvio_progress.get(x.key.stable_id))
+                ]
                 if delta:
                     await NuvioClient.push_watched(nuvio_session.access_token, settings.nuvio_profile_id, delta)
-                if active_progress:
-                    await NuvioClient.push_progress(nuvio_session.access_token, settings.nuvio_profile_id, active_progress)
+                if progress_delta:
+                    await NuvioClient.push_progress(
+                        nuvio_session.access_token,
+                        settings.nuvio_profile_id,
+                        progress_delta,
+                    )
                 pushed_nuvio_watched = len(delta)
+                pushed_nuvio_progress = len(progress_delta)
 
             if settings.push_stremio and settings.stremio_auth_key:
                 delta = [x for k, x in mb_watched.items() if k not in stremio_watched]
+                progress_delta = [
+                    x
+                    for x in active_progress
+                    if progress_needs_push(x, stremio_progress.get(x.key.stable_id))
+                ]
                 # merge_into_account preserves Stremio fields and no-ops unchanged records.
-                await stremio.merge_into_account(settings.stremio_auth_key, delta, active_progress)
+                await stremio.merge_into_account(
+                    settings.stremio_auth_key,
+                    delta,
+                    progress_delta,
+                )
                 pushed_stremio_watched = len(delta)
+                pushed_stremio_progress = len(progress_delta)
 
             self.cached_playback = mb_progress
             self.cached_watched = mb_watched
-            self.last_run = datetime.now(timezone.utc)
+            self.last_run = datetime.now(UTC)
             self.last_error = ""
             self.last_stats = {
                 "mdblist_watched": len(mb_watched),
@@ -164,6 +183,8 @@ class SyncEngine:
                 "stremio_watched_seen": len(stremio_watched),
                 "pushed_nuvio_watched": pushed_nuvio_watched,
                 "pushed_stremio_watched": pushed_stremio_watched,
+                "pushed_nuvio_progress": pushed_nuvio_progress,
+                "pushed_stremio_progress": pushed_stremio_progress,
                 "active_progress_pushed": len(active_progress),
             }
             return {"status": "ok", **self.last_stats}
@@ -193,3 +214,10 @@ def is_remote_newer(remote: ProgressItem, current: ProgressItem) -> bool:
     if delta >= -5 and abs(remote.percent - current.percent) >= 1.0:
         return remote.percent > current.percent
     return False
+
+
+def progress_needs_push(canonical: ProgressItem, remote: ProgressItem | None) -> bool:
+    """Avoid rewriting an unchanged provider progress row every polling cycle."""
+    if remote is None:
+        return True
+    return abs(canonical.percent - remote.percent) >= 0.5

@@ -1,7 +1,15 @@
 from __future__ import annotations
 
 
-def render_home(*, mdblist: bool, tmdb: bool, nuvio: bool, stremio: bool, addon_url: str) -> str:
+def render_home(
+    *,
+    mdblist: bool,
+    tmdb: bool,
+    nuvio: bool,
+    stremio: bool,
+    sync_interval_seconds: int,
+    addon_url: str,
+) -> str:
     return f"""<!doctype html>
 <html>
 <head>
@@ -31,19 +39,21 @@ Stremio: <span class="{'ok' if stremio else 'bad'}">{'connected' if stremio else
 <h3>1. MDBList and TMDB</h3>
 <div class="grid"><div><label>MDBList API key</label><input id="mdb" type="password" autocomplete="off"></div>
 <div><label>TMDB Read Access Token</label><input id="tmdb" type="password" autocomplete="off"></div></div>
-<button onclick="saveKeys()">Save keys</button> <span id="keymsg"></span>
+<label>Sync interval in seconds (900 = 15 minutes)</label>
+<input id="interval" type="number" min="30" value="{sync_interval_seconds}">
+<button onclick="saveSettings()">Save settings</button> <span id="keymsg"></span>
 </div>
 <div class="card">
 <h3>2. Nuvio</h3>
 <small>Your password is used once to obtain Nuvio tokens and is not written to the MDBridge config file.</small>
 <div class="grid"><div><label>Email</label><input id="nemail" type="email"></div><div><label>Password</label><input id="npass" type="password"></div></div>
 <label>Profile number (normally 1)</label><input id="nprofile" type="number" min="1" max="6" value="1">
-<button onclick="connectNuvio()">Connect Nuvio</button> <span id="nmsg"></span>
+<button onclick="connectNuvio()">Connect Nuvio</button><button onclick="disconnectNuvio()">Disconnect</button> <span id="nmsg"></span>
 </div>
 <div class="card">
 <h3>3. Stremio</h3>
 <p>Use Stremio's account link flow. This covers every TV signed into that Stremio account.</p>
-<button onclick="startStremio()">Create Stremio link</button>
+<button onclick="startStremio()">Create Stremio link</button><button onclick="disconnectStremio()">Disconnect</button>
 <div id="slink"></div>
 </div>
 <div class="card">
@@ -58,11 +68,13 @@ Stremio: <span class="{'ok' if stremio else 'bad'}">{'connected' if stremio else
 <script>
 let activeCode = null;
 async function jsonFetch(url, options={{}}) {{
-  let r = await fetch(url, options); let data = await r.json();
+  let r = await fetch(url, options); let text = await r.text(); let data;
+  try {{ data = text ? JSON.parse(text) : {{}}; }} catch {{ data = {{detail: text || 'Invalid server response'}}; }}
   if (!r.ok) throw new Error(data.detail || JSON.stringify(data)); return data;
 }}
-async function saveKeys() {{
+async function saveSettings() {{
   try {{ let body={{}}; if(mdb.value) body.mdblist_api_key=mdb.value; if(tmdb.value) body.tmdb_token=tmdb.value;
+    body.sync_interval_seconds=Number(interval.value);
     await jsonFetch('/api/settings',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify(body)}}); keymsg.textContent='Saved'; status(); }}
   catch(e){{keymsg.textContent=e.message}}
 }}
@@ -70,14 +82,26 @@ async function connectNuvio() {{
   try {{let data=await jsonFetch('/api/nuvio/connect',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{email:nemail.value,password:npass.value,profile_id:Number(nprofile.value)}})}}); npass.value=''; nmsg.textContent='Connected'; status();}}
   catch(e){{nmsg.textContent=e.message}}
 }}
+async function disconnectNuvio() {{
+  try {{await jsonFetch('/api/nuvio/disconnect',{{method:'POST'}}); nmsg.textContent='Disconnected'; status();}}
+  catch(e){{nmsg.textContent=e.message}}
+}}
 async function startStremio() {{
   try {{let d=await jsonFetch('/api/stremio/link/start',{{method:'POST'}}); activeCode=d.code;
-    slink.innerHTML=`<p>Code: <b>${{d.code}}</b><br><a href="${{d.link}}" target="_blank" rel="noopener">Authorize in Stremio</a></p><button onclick="checkStremio()">I authorized it, check now</button><span id="smsg"></span>`;}}
+    slink.textContent=''; let p=document.createElement('p'); let strong=document.createElement('b'); strong.textContent=d.code;
+    p.append('Code: ',strong,document.createElement('br')); let link=document.createElement('a'); link.href=d.link;
+    link.target='_blank'; link.rel='noopener'; link.textContent='Authorize in Stremio'; p.append(link); slink.append(p);
+    let button=document.createElement('button'); button.textContent='I authorized it, check now'; button.onclick=checkStremio;
+    let message=document.createElement('span'); message.id='smsg'; slink.append(button,message);}}
   catch(e){{slink.textContent=e.message}}
 }}
 async function checkStremio() {{
   try {{let d=await jsonFetch('/api/stremio/link/status/'+activeCode); smsg.textContent=d.authorized?' Connected':' Not authorized yet'; if(d.authorized) status();}}
   catch(e){{smsg.textContent=e.message}}
+}}
+async function disconnectStremio() {{
+  try {{await jsonFetch('/api/stremio/disconnect',{{method:'POST'}}); slink.textContent='Disconnected'; status();}}
+  catch(e){{slink.textContent=e.message}}
 }}
 async function syncNow() {{try{{statusEl().textContent='Syncing...'; let d=await jsonFetch('/api/sync',{{method:'POST'}}); statusEl().textContent=JSON.stringify(d,null,2)}}catch(e){{statusEl().textContent=e.message}}}}
 function statusEl(){{return document.getElementById('status')}}

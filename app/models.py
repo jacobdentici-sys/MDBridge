@@ -1,29 +1,29 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 
 def utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def parse_time(value: Any) -> datetime:
     if isinstance(value, datetime):
-        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+        return value if value.tzinfo else value.replace(tzinfo=UTC)
     if isinstance(value, (int, float)):
         # Millisecond epochs are common in Nuvio.
         seconds = float(value) / 1000.0 if float(value) > 10_000_000_000 else float(value)
-        return datetime.fromtimestamp(seconds, tz=timezone.utc)
+        return datetime.fromtimestamp(seconds, tz=UTC)
     if isinstance(value, str) and value:
         text = value.strip().replace("Z", "+00:00")
         try:
             parsed = datetime.fromisoformat(text)
-            return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+            return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
         except ValueError:
             pass
-    return datetime.fromtimestamp(0, tz=timezone.utc)
+    return datetime.fromtimestamp(0, tz=UTC)
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,7 +65,7 @@ class ProgressItem:
     source: str = ""
     tmdb_id: int | None = None
 
-    def normalized(self) -> "ProgressItem":
+    def normalized(self) -> ProgressItem:
         self.percent = max(0.0, min(100.0, float(self.percent)))
         if self.duration_ms and not self.position_ms:
             self.position_ms = int(self.duration_ms * self.percent / 100.0)

@@ -3,13 +3,12 @@ from __future__ import annotations
 import base64
 import re
 import zlib
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
 
 from .models import MediaKey, ProgressItem, WatchedItem, parse_time
-
 
 API = "https://api.strem.io/api"
 LINK = "https://link.stremio.com/api/v2"
@@ -150,7 +149,7 @@ class StremioClient:
     ) -> None:
         remote = await self.get_items(auth_key)
         by_id = {str(x.get("_id")): x for x in remote if x.get("_id")}
-        now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        now = datetime.now(UTC).isoformat().replace("+00:00", "Z")
         candidates: dict[str, dict[str, Any]] = {}
         series_ids = {x.key.imdb for x in watched_items if x.key.kind == "episode"}
         series_ids |= {x.key.imdb for x in progress_items if x.key.kind == "episode"}
@@ -208,7 +207,7 @@ class StremioClient:
     def _videos(meta: dict[str, Any]) -> list[dict[str, Any]]:
         return sorted(
             [x for x in (meta.get("videos") or []) if isinstance(x, dict) and x.get("id")],
-            key=lambda x: (*((video_parts(str(x.get("id"))) or (-1, -1))), str(x.get("released") or "")),
+            key=lambda x: (*(video_parts(str(x.get("id"))) or (-1, -1)), str(x.get("released") or "")),
         )
 
     @staticmethod

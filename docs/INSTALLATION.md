@@ -12,7 +12,7 @@ You need:
 - a TMDB Read Access Token
 - optionally, a Nuvio Cloud account and a Stremio account
 
-Back up your existing watch history before enabling bidirectional synchronization. MDBridge is early-alpha software and watched synchronization is additive: manual unwatch does not propagate in version 0.1.1.
+Back up your existing watch history before enabling bidirectional synchronization. MDBridge is early-alpha software and watched synchronization is additive: manual unwatch does not propagate in version 0.1.2.
 
 ## Quick install
 
@@ -22,6 +22,8 @@ cd MDBridge
 docker compose up -d --build
 docker compose ps
 ```
+
+The built-in default is 900 seconds. To choose a different interval before the first start, copy `.env.example` to `.env` and edit `MDBRIDGE_SYNC_INTERVAL`. Existing installations should change the interval from the setup page because their saved `config.json` takes precedence.
 
 The supplied Compose configuration listens only on `127.0.0.1:7335` because the setup page can change account connections and contains credential-bearing operations.
 
@@ -79,7 +81,7 @@ The default 15-minute interval produces 96 runs daily. With the current two base
 
 MDBList free accounts currently receive 1,000 requests per day. Avoid a 60-second interval on a free account; two baseline reads per minute would use about 2,880 requests daily.
 
-Change the interval in `docker-compose.yml` before the first start or through the setup API after installation. The value is in seconds and cannot be lower than 30.
+Change the interval in `.env` before the first start or from the setup page afterward. The value is in seconds and cannot be lower than 30.
 
 ## Updating
 
@@ -91,6 +93,8 @@ docker compose up -d --build
 
 The `data/` directory persists across rebuilds. Back it up securely because it contains service tokens and API credentials.
 
+Version 0.1.2 is data-compatible with 0.1.1 and requires no migration.
+
 ## Health checks
 
 ```bash
@@ -100,4 +104,3 @@ docker compose logs --tail=100
 ```
 
 Healthy output includes `{"ok":true}`, a recent `last_run`, and `last_error: null`.
-
